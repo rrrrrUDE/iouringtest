@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <linux/io_uring.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/syscall.h>
 #include <unistd.h>

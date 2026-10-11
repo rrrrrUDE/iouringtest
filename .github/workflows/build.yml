@@ -1,0 +1,50 @@
+name: Build io_uring test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-arm64:
+    name: Build Android ARM64 test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;29.0.14206865"
+
+      - name: Compile test binary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NDK="${ANDROID_HOME}/ndk/29.0.14206865"
+          CC="${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+          mkdir -p dist
+          "$CC" --version
+          "$CC" -O2 -Wall -Wextra -Werror -static test_iouring.c -o dist/iouringtest-arm64
+          file dist/iouringtest-arm64
+          readelf -h dist/iouringtest-arm64
+
+      - name: Upload Android ARM64 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: iouringtest-android-arm64
+          path: dist/iouringtest-arm64
+          if-no-files-found: error
+          retention-days: 30

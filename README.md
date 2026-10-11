@@ -1,21 +1,20 @@
-# io_uring Test for Android
+# Minimal io_uring Validation for Android
 
-A small runtime test for checking whether an Android/Linux kernel can create an io_uring instance, map its shared rings, submit `IORING_OP_READ` and `IORING_OP_WRITE`, and receive successful completion queue entries.
+A minimal runtime check for an Android/Linux ARM64 kernel: call `io_uring_setup(2, ...)` and close the returned file descriptor. It does **not** map the rings or submit I/O.
 
-This project does not modify or build a kernel. GitHub Actions cross-compiles a standalone AArch64 Android test binary.
+GitHub Actions cross-compiles a standalone AArch64 Android executable; it does not build or modify the kernel.
 
-## Download the binary
+## Download
 
 1. Open the repository's **Actions** tab.
-2. Select **Build io_uring test** and open a successful run.
-3. Download the `iouringtest-android-arm64` artifact ZIP.
-4. Extract `iouringtest-arm64` on your phone.
+2. Open a successful **Build io_uring test** run.
+3. Download the `iouringtest-android-arm64` artifact ZIP and extract `iouringtest-arm64`.
 
-A new push to `main` or a manual **Run workflow** also starts a build.
+A push to `main` or manual **Run workflow** starts a build.
 
-## Run on the Android phone
+## Run on the phone
 
-Move the extracted executable to `/data/local/tmp` using a root-capable shell. For example, if the browser saved it to Downloads:
+From a root-capable shell, adjust the source path if needed:
 
 ```sh
 su
@@ -24,20 +23,11 @@ chmod 755 /data/local/tmp/iouringtest
 /data/local/tmp/iouringtest
 ```
 
-Adjust the source path if your browser uses a different download directory.
-
-The test creates `/data/local/tmp/iouringtest-data.txt`, then performs an io_uring read and write and verifies the resulting data. It does not intentionally modify any existing user file.
-
 ## Interpret results
 
-- `RESULT: ALL TESTS PASSED`: setup, ring mappings, READ, WRITE, and completion checks passed.
-- `Function not implemented` (`ENOSYS`): syscall is unavailable or not implemented.
-- `Operation not permitted` (`EPERM`): a security policy or syscall filter may be blocking it.
-- `Invalid argument` (`EINVAL`): inspect the kernel implementation and dmesg; this alone does not prove the syscall is absent.
-- Other failures: check the printed errno and kernel log.
+- `RESULT: MINIMAL VALIDATION PASSED`: the kernel accepted `io_uring_setup` and the instance was closed cleanly.
+- `ENOSYS` / `Function not implemented`: the syscall is unavailable or not implemented.
+- `EPERM` / `Operation not permitted`: a security policy or syscall filter may be blocking it.
+- `EINVAL`: the syscall returned an invalid-argument error; this alone does not prove the syscall is absent.
 
-Run it from a shell with sufficient permissions. Android seccomp, SELinux, or vendor policy can make a test under an app differ from one run in a root shell.
-
-## Scope
-
-This is a focused smoke test for basic file READ/WRITE on the test file. It does not validate every io_uring opcode, registered buffers/files, SQPOLL, or performance.
+Run from a root shell to reduce permission-related ambiguity. A pass only confirms that an io_uring instance can be created and closed. It does **not** verify ring memory mappings, `io_uring_enter`, READ/WRITE operations, completion events, stability, or performance.

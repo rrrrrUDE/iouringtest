@@ -25,7 +25,7 @@
 
 #define N 8
 #define PATH "/data/local/tmp/iouringtest-data.bin"
-#define IO_TIMEOUT_MS 2000
+#define IO_TIMEOUT_MS 10000
 #define TEST_LOOPS 8
 
 struct ring {

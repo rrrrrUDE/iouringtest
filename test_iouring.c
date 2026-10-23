@@ -255,16 +255,21 @@ static int run_tests(struct ring *r)
             goto fail;
         }
 
-        probe->ops_len = 128;
+        /*
+         * IORING_REGISTER_PROBE requires the input buffer to be zeroed.
+         * The kernel fills ops_len, last_op and ops[] in its response.
+         */
         int n = syscall(__NR_io_uring_register, r->fd,
                         IORING_REGISTER_PROBE, probe, 128);
         if (n < 0) {
-            printf("INFO: PROBE unavailable: errno=%d (%s)\n",
+            printf("FAIL: PROBE errno=%d (%s)\n",
                    errno, strerror(errno));
-        } else {
-            printf("PASS: PROBE returned %d, last_op=%u\n",
-                   n, probe->last_op);
+            free(probe);
+            goto fail;
         }
+
+        printf("PASS: PROBE returned %d, last_op=%u, ops_len=%u\n",
+               n, probe->last_op, probe->ops_len);
         free(probe);
     }
 

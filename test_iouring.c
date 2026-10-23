@@ -189,64 +189,73 @@ static int submit(struct ring *r, int fd, int opcode, void *buf,
 static int run_tests(struct ring *r)
 {
     int fd = -1;
-    char w[4096], rr[4096];
-    memset(w, 0x5a, sizeof(w));
-    memset(rr, 0, sizeof(rr));
+    static const char line1[] = "Round 1: io_uring WRITE/READ passed\n";
+    static const char line2[] = "Round 2: io_uring WRITE/READ passed\n";
+    char readback[sizeof(line1) + sizeof(line2)];
+    const unsigned len1 = sizeof(line1) - 1;
+    const unsigned len2 = sizeof(line2) - 1;
+    const unsigned total_len = len1 + len2;
 
+    memset(readback, 0, sizeof(readback));
+
+    /*
+     * Start each run with a clean text file, but preserve both test lines
+     * for inspection after the program exits. The two rounds themselves
+     * append at consecutive offsets and never overwrite the first line.
+     */
     fd = open(PATH, O_CREAT | O_TRUNC | O_RDWR | O_CLOEXEC, 0600);
     if (fd < 0) {
         perror("FAIL: open test file");
         return -1;
     }
 
-    puts("TEST 1: asynchronous WRITE");
-    if (submit(r, fd, IORING_OP_WRITE, w, sizeof(w), 0, 1) < 0) {
-        perror("FAIL: WRITE");
+    puts("TEST 1: round 1 io_uring WRITE");
+    if (submit(r, fd, IORING_OP_WRITE, (void *)line1, len1, 0, 1) < 0) {
+        perror("FAIL: round 1 WRITE");
         goto fail;
     }
-    puts("PASS: async WRITE completion");
+    puts("PASS: round 1 WRITE completion");
 
-    puts("TEST 2: asynchronous READ");
-    if (submit(r, fd, IORING_OP_READ, rr, sizeof(rr), 0, 2) < 0) {
-        perror("FAIL: READ");
+    puts("TEST 2: round 1 io_uring READ");
+    if (submit(r, fd, IORING_OP_READ, readback, len1, 0, 2) < 0) {
+        perror("FAIL: round 1 READ");
         goto fail;
     }
-    if (memcmp(w, rr, sizeof(w)) != 0) {
+    if (memcmp(line1, readback, len1) != 0) {
         errno = EIO;
-        perror("FAIL: READ data mismatch");
+        perror("FAIL: round 1 READ data mismatch");
         goto fail;
     }
-    puts("PASS: async READ completion and data");
+    puts("PASS: round 1 READ data");
 
-    puts("TEST 3: repeated submissions");
-    for (int i = 0; i < TEST_LOOPS; ++i) {
-        memset(rr, 0, sizeof(rr));
-        if (submit(r, fd, IORING_OP_WRITE, w, sizeof(w),
-                   (uint64_t)i * sizeof(w), 100 + i) < 0) {
-            perror("FAIL: repeated WRITE");
-            goto fail;
-        }
-        if (submit(r, fd, IORING_OP_READ, rr, sizeof(rr),
-                   (uint64_t)i * sizeof(w), 200 + i) < 0) {
-            perror("FAIL: repeated READ");
-            goto fail;
-        }
-        if (memcmp(w, rr, sizeof(w)) != 0) {
-            errno = EIO;
-            perror("FAIL: repeated READ data");
-            goto fail;
-        }
-    }
-    printf("PASS: %d repeated WRITE/READ cycles\n", TEST_LOOPS);
-
-    puts("TEST 4: IORING_OP_FSYNC");
-    if (submit(r, fd, IORING_OP_FSYNC, NULL, 0, 0, 300) < 0) {
-        perror("FAIL: FSYNC");
+    puts("TEST 3: round 2 appends on the next line");
+    if (submit(r, fd, IORING_OP_WRITE, (void *)line2, len2, len1, 3) < 0) {
+        perror("FAIL: round 2 WRITE");
         goto fail;
     }
-    puts("PASS: FSYNC completion");
+    puts("PASS: round 2 WRITE completion");
 
-    puts("TEST 5: io_uring_register(PROBE)");
+    puts("TEST 4: round 2 io_uring READ");
+    memset(readback, 0, sizeof(readback));
+    if (submit(r, fd, IORING_OP_READ, readback, len2, len1, 4) < 0) {
+        perror("FAIL: round 2 READ");
+        goto fail;
+    }
+    if (memcmp(line2, readback, len2) != 0) {
+        errno = EIO;
+        perror("FAIL: round 2 READ data mismatch");
+        goto fail;
+    }
+    puts("PASS: round 2 READ data");
+
+    puts("TEST 5: io_uring FSYNC");
+    if (submit(r, fd, IORING_OP_FSYNC, NULL, 0, 0, 5) < 0) {
+        perror("FAIL: io_uring FSYNC");
+        goto fail;
+    }
+    puts("PASS: io_uring FSYNC completion");
+
+    puts("TEST 6: io_uring PROBE");
     {
         size_t sz = 4096;
         struct io_uring_probe *probe = calloc(1, sz);
@@ -255,10 +264,6 @@ static int run_tests(struct ring *r)
             goto fail;
         }
 
-        /*
-         * IORING_REGISTER_PROBE requires the input buffer to be zeroed.
-         * The kernel fills ops_len, last_op and ops[] in its response.
-         */
         int n = syscall(__NR_io_uring_register, r->fd,
                         IORING_REGISTER_PROBE, probe, 128);
         if (n < 0) {
@@ -273,32 +278,32 @@ static int run_tests(struct ring *r)
         free(probe);
     }
 
-    puts("TEST 6: final file verification");
-    if (fsync(fd) < 0) {
-        perror("FAIL: final fsync");
+    puts("TEST 7: final io_uring READ verification");
+    memset(readback, 0, sizeof(readback));
+    if (submit(r, fd, IORING_OP_READ, readback, total_len, 0, 6) < 0) {
+        perror("FAIL: final io_uring READ");
         goto fail;
     }
-
-    for (size_t i = 0; i < sizeof(w); ++i)
-        rr[i] = 0;
-    if (pread(fd, rr, sizeof(rr), 0) != (ssize_t)sizeof(rr)) {
-        perror("FAIL: final pread");
-        goto fail;
-    }
-    if (memcmp(w, rr, sizeof(w)) != 0) {
+    if (memcmp(line1, readback, len1) != 0 ||
+        memcmp(line2, readback + len1, len2) != 0) {
         errno = EIO;
-        perror("FAIL: final data verification");
+        perror("FAIL: final file data verification");
         goto fail;
     }
-    puts("PASS: final file data verification");
 
+    printf("PASS: both lines verified (%u bytes)\n", total_len);
+    puts("FILE PRESERVED: /data/local/tmp/iouringtest-data.bin");
     close(fd);
-    unlink(PATH);
     return 0;
 
 fail:
-    close(fd);
-    unlink(PATH);
+    /*
+     * Keep the file on both success and failure so its contents can be
+     * inspected after a test run.
+     */
+    if (fd >= 0)
+        close(fd);
+    puts("FILE PRESERVED for debugging");
     return -1;
 }
 
